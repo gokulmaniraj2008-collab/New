@@ -41,9 +41,6 @@ jobs:
 
           if not archive.is_file():
               raise SystemExit("Expected veloura-source.zip at repository root.")
-          if destination.exists():
-              raise SystemExit("Refusing to overwrite existing veloura/ directory.")
-
           with ZipFile(archive) as zf:
               entries = zf.infolist()
               if len(entries) > 1000:
@@ -63,17 +60,23 @@ jobs:
                   if mode == 0o120000:
                       raise SystemExit(f"Symbolic links are not allowed: {name}")
 
-              with tempfile.TemporaryDirectory() as tmp:
-                  extracted = Path(tmp) / "source"
-                  extracted.mkdir()
-                  zf.extractall(extracted)
-                  if not (extracted / "package.json").is_file():
-                      raise SystemExit("package.json was not found at the archive root.")
-                  if not (extracted / "src").is_dir() or not (extracted / "public").is_dir():
-                      raise SystemExit("Expected src/ and public/ project directories.")
-                  shutil.copytree(extracted, destination)
-
-          print(f"Extracted {len(entries)} archive entries into {destination}/")
+              if destination.exists():
+                  if not (destination / "package.json").is_file():
+                      raise SystemExit("Existing veloura/ directory is incomplete; refusing to overwrite it.")
+                  if not (destination / "src").is_dir() or not (destination / "public").is_dir():
+                      raise SystemExit("Existing veloura/ directory is missing src/ or public/.")
+                  print("veloura/ already exists; validated it and skipped extraction.")
+              else:
+                  with tempfile.TemporaryDirectory() as tmp:
+                      extracted = Path(tmp) / "source"
+                      extracted.mkdir()
+                      zf.extractall(extracted)
+                      if not (extracted / "package.json").is_file():
+                          raise SystemExit("package.json was not found at the archive root.")
+                      if not (extracted / "src").is_dir() or not (extracted / "public").is_dir():
+                          raise SystemExit("Expected src/ and public/ project directories.")
+                      shutil.copytree(extracted, destination)
+                  print(f"Extracted {len(entries)} archive entries into {destination}/")
           PY
 
       - name: Commit extracted source while preserving the ZIP
@@ -81,8 +84,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add veloura/
-          git commit -m "Extract Veloura website source"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No new extracted source changes to commit."
+          else
+            git commit -m "Extract Veloura website source"
+            git push origin main
+          fi
 
       - name: Set up pnpm before enabling pnpm cache
         uses: pnpm/action-setup@v4
