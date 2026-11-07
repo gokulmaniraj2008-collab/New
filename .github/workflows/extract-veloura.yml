@@ -1,0 +1,105 @@
+name: Extract Veloura source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/extract-veloura.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: veloura-source-extraction
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Safely extract the preserved source archive
+        run: |
+          python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+          import shutil
+          import tempfile
+
+          archive = Path("veloura-source.zip")
+          destination = Path("veloura")
+
+          if not archive.is_file():
+              raise SystemExit("Expected veloura-source.zip at repository root.")
+          if destination.exists():
+              raise SystemExit("Refusing to overwrite existing veloura/ directory.")
+
+          with ZipFile(archive) as zf:
+              entries = zf.infolist()
+              if len(entries) > 1000:
+                  raise SystemExit("Archive contains too many entries.")
+              total_size = sum(item.file_size for item in entries)
+              if total_size > 150 * 1024 * 1024:
+                  raise SystemExit("Archive expands beyond the 150 MiB safety limit.")
+
+              for item in entries:
+                  name = item.filename
+                  path = PurePosixPath(name)
+                  if not name or name.startswith("/") or "\\" in name or ".." in path.parts:
+                      raise SystemExit(f"Unsafe archive path: {name!r}")
+                  if item.flag_bits & 0x1:
+                      raise SystemExit(f"Encrypted archive entry is not allowed: {name}")
+                  mode = (item.external_attr >> 16) & 0o170000
+                  if mode == 0o120000:
+                      raise SystemExit(f"Symbolic links are not allowed: {name}")
+
+              with tempfile.TemporaryDirectory() as tmp:
+                  extracted = Path(tmp) / "source"
+                  extracted.mkdir()
+                  zf.extractall(extracted)
+                  if not (extracted / "package.json").is_file():
+                      raise SystemExit("package.json was not found at the archive root.")
+                  if not (extracted / "src").is_dir() or not (extracted / "public").is_dir():
+                      raise SystemExit("Expected src/ and public/ project directories.")
+                  shutil.copytree(extracted, destination)
+
+          print(f"Extracted {len(entries)} archive entries into {destination}/")
+          PY
+
+      - name: Commit extracted source while preserving the ZIP
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add veloura/
+          git commit -m "Extract Veloura website source"
+          git push origin main
+
+      - name: Set up Node.js and pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: veloura/pnpm-lock.yaml
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.25.0"
+
+      - name: Install dependencies
+        working-directory: veloura
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production website
+        working-directory: veloura
+        run: pnpm run build
