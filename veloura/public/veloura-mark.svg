@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Veloura V monogram">
+  <rect width="64" height="64" rx="12" fill="#151715"/>
+  <path d="M13 16h9l10 28 10-28h9L34 54h-5L13 16Z" fill="#c8ae86"/>
+  <path d="M18 16h5l9 24-5-2-9-22ZM41 16h5L35 45h-5l11-29Z" fill="#eeeae2" opacity=".42"/>
+</svg>
